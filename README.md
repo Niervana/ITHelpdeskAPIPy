@@ -4,7 +4,7 @@ Integrasi script Python untuk pengumpulan spesifikasi PC otomatis pada sistem IT
 
 ## 📋 Overview
 
-Sistem ini memungkinkan user untuk secara otomatis mengumpulkan spesifikasi PC mereka melalui script Python dan mengirimkannya ke server IT Helpdesk untuk memperbarui inventory.
+Sistem untuk secara otomatis mengumpulkan spesifikasi PC client melalui script Python dan mengirimkannya ke server Nirvana IT Helpdesk untuk memperbarui inventory.
 
 ### Flow Sistem:
 
@@ -245,3 +245,4 @@ Untuk bantuan atau pertanyaan:
 **Version**: 1.0.0
 **Last Updated**: 2025-01-15
 **Compatible**: Windows 7/8/10/11, Python 3.6+
+
