@@ -31,39 +31,118 @@ API_KEY = "VyyLY87xmeQ712gGkWR72YNDhFHFbfR6"
 
 
 def get_cpu_info():
-    """Get CPU information."""
+    """Get CPU information with better formatting."""
     try:
-        # Try to get CPU brand name
+        # Try to get CPU brand name using cpuinfo library
         import cpuinfo
         cpu_info = cpuinfo.get_cpu_info()
-        return cpu_info['brand_raw']
-    except:
+        brand = cpu_info.get('brand_raw', '')
+
+        # Clean up common CPU names for better readability
+        brand = brand.replace('(R)', '').replace('(TM)', '').replace('CPU', '').strip()
+        brand = brand.replace('  ', ' ')  # Remove double spaces
+
+        # Extract key information for AMD Ryzen
+        if 'AMD' in brand.upper():
+            # Try to extract Ryzen model
+            import re
+            ryzen_match = re.search(r'Ryzen\s*\d+\s*\d*[A-Za-z]*', brand, re.IGNORECASE)
+            if ryzen_match:
+                return ryzen_match.group().strip()
+
+        # Extract key information for Intel Core
+        if 'Intel' in brand.upper() or 'Core' in brand:
+            import re
+            core_match = re.search(r'(?:Intel\s*)?(?:Core\s+)?i\d+[-\s]*\d*[A-Za-z]*', brand, re.IGNORECASE)
+            if core_match:
+                return core_match.group().strip()
+
+        return brand if brand else "Unknown CPU"
+
+    except ImportError:
+        # Fallback if cpuinfo is not available
         try:
-            # Fallback to platform.processor()
+            # Try using wmic for Windows
+            import subprocess
+            result = subprocess.check_output(
+                'wmic cpu get name /value', shell=True
+            ).decode(errors='ignore').strip()
+
+            # Parse the result
+            for line in result.split('\n'):
+                if line.startswith('Name='):
+                    cpu_name = line.split('=', 1)[1].strip()
+                    # Clean up the name
+                    cpu_name = cpu_name.replace('(R)', '').replace('(TM)', '').replace('CPU', '').strip()
+                    return cpu_name
+
+        except:
+            pass
+
+        # Final fallback
+        try:
             cpu = platform.processor()
             if cpu and cpu.strip():
                 return cpu
-            # If still empty, try psutil
-            return f"{psutil.cpu_count(logical=False)} cores @ {psutil.cpu_freq().max:.0f}MHz"
+        except:
+            pass
+
+        return "Unknown CPU"
+
+
+def get_ram_info():
+    """Get physical RAM information in GB."""
+    try:
+        import wmi
+        wmi_obj = wmi.WMI()
+        
+        # Get physical memory modules
+        total_ram = 0
+        for memory in wmi_obj.Win32_PhysicalMemory():
+            capacity = int(memory.Capacity)
+            total_ram += capacity
+        
+        # Convert bytes to GB
+        ram_gb = total_ram / (1024 ** 3)
+        
+        # Round to common RAM sizes
+        if ram_gb >= 15 and ram_gb < 17:
+            return "16"
+        elif ram_gb >= 7 and ram_gb < 9:
+            return "8"
+        elif ram_gb >= 31 and ram_gb < 33:
+            return "32"
+        elif ram_gb >= 3 and ram_gb < 5:
+            return "4"
+        elif ram_gb >= 63 and ram_gb < 65:
+            return "64"
+        else:
+            return f"{ram_gb:.0f}"
+    except:
+        # Fallback to psutil
+        try:
+            ram_gb = psutil.virtual_memory().total / (1024 ** 3)
+            # Round to nearest common size
+            if ram_gb >= 15 and ram_gb < 17:
+                return "16"
+            elif ram_gb >= 7 and ram_gb < 9:
+                return "8"
+            else:
+                return f"{ram_gb:.0f}"
         except:
             return "Unknown"
 
 
-def get_ram_info():
-    """Get RAM information in GB."""
-    try:
-        ram_gb = psutil.virtual_memory().total / (1024 ** 3)
-        return f"{ram_gb:.1f} GB"
-    except:
-        return "Unknown"
-
-
 def get_os_info():
-    """Get OS information."""
+    """Get OS information using WMI."""
     try:
-        return platform.platform()
+        import wmi
+        wmi_obj = wmi.WMI()
+        os_info = wmi_obj.Win32_OperatingSystem()[0]
+        os_name = os_info.Caption
+        return os_name
     except:
-        return platform.system()
+        return "Unknown OS"
 
 
 def get_ip_address():
@@ -85,30 +164,158 @@ def get_hostname():
 
 
 def get_storage_info():
-    """Get total storage in GB from all partitions."""
+    """Get physical storage information."""
     try:
-        total_storage = 0
-        partitions = psutil.disk_partitions()
+        import wmi
+        wmi_obj = wmi.WMI()
         
-        for partition in partitions:
-            try:
-                usage = psutil.disk_usage(partition.mountpoint)
-                total_storage += usage.total
-            except PermissionError:
-                # Skip partitions we can't access
-                continue
+        # Get first physical disk
+        disk = wmi_obj.Win32_DiskDrive()[0]
+        storage_name = disk.Model  # contoh: "Samsung MZVL2512HCJQ-00B00"
+        storage_size_bytes = int(disk.Size)
+        storage_size_gb = storage_size_bytes / (1024**3)
         
-        total_gb = total_storage / (1024 ** 3)
-        return f"{total_gb:.1f} GB"
-    except:
-        return "Unknown"
+        # Get interface type to determine if it's NVMe
+        interface_type = getattr(disk, 'InterfaceType', '').upper()
+        
+        # Determine storage type
+        storage_type = "HDD"
+        storage_name_upper = storage_name.upper()
+        
+        # Check for NVMe - prioritas tertinggi
+        if interface_type == "NVME" or "NVME" in storage_name_upper:
+            storage_type = "SSD NVMe M.2"
+        # Check for other SSD indicators
+        elif any(indicator in storage_name_upper for indicator in ["SSD", "SOLID STATE"]):
+            storage_type = "SSD"
+        # Check based on common SSD manufacturer names
+        elif any(brand in storage_name_upper for brand in ["SAMSUNG", "KINGSTON", "WD", "CRUCIAL", "INTEL", "SANDISK", "ADATA", "SK HYNIX", "MICRON", "TOSHIBA", "SEAGATE BARRACUDA SSD"]):
+            # Most modern SSDs from these brands in M.2 form factor are NVMe
+            if storage_size_gb >= 240:  # M.2 NVMe typically 256GB+
+                storage_type = "SSD NVMe M.2"
+            else:
+                storage_type = "SSD"
+        # Default to HDD if no SSD indicators found
+        else:
+            storage_type = "HDD"
+        
+        # Round to common storage sizes
+        if storage_size_gb >= 480 and storage_size_gb < 550:
+            storage_capacity = "512"
+        elif storage_size_gb >= 240 and storage_size_gb < 270:
+            storage_capacity = "256"
+        elif storage_size_gb >= 120 and storage_size_gb < 135:
+            storage_capacity = "128"
+        elif storage_size_gb >= 950 and storage_size_gb < 1100:
+            storage_capacity = "1024"
+        elif storage_size_gb >= 1900 and storage_size_gb < 2100:
+            storage_capacity = "2048"
+        else:
+            storage_capacity = f"{storage_size_gb:.0f}"
+        
+        storage = f"{storage_type} {storage_capacity} GB"
+        return storage
+    except Exception as e:
+        return f"Unknown (Error: {str(e)})"
+
+
+def get_device_model():
+    """Get device model with full product name lookup."""
+    try:
+        import wmi
+        c = wmi.WMI()
+
+        # List of generic names to avoid
+        generic_names = [
+            "System Product Name", 
+            "Computer System Product", 
+            "To Be Filled By O.E.M.", 
+            "Default String",
+            "INVALID"
+        ]
+
+        # First, try to get system model/version (often contains full product name)
+        try:
+            cs = c.Win32_ComputerSystem()[0]
+            model = cs.Model or ""
+            
+            # Check if model contains useful information
+            if model and model.strip() and model not in generic_names:
+                # For Lenovo, check if it's a short code like "82K2"
+                if len(model) <= 6 and model.isalnum():
+                    # Try to get the full name from SystemFamily or other properties
+                    try:
+                        bios = c.Win32_BIOS()[0]
+                        # Some manufacturers put full name in version
+                        version = getattr(cs, 'SystemFamily', None)
+                        if version and version.strip() and version not in generic_names:
+                            return version.strip()
+                    except:
+                        pass
+                    
+                    # If still short code, try Win32_ComputerSystemProduct
+                    try:
+                        product = c.Win32_ComputerSystemProduct()[0]
+                        version = product.Version or ""
+                        if version and version.strip() and version not in generic_names:
+                            manufacturer = cs.Manufacturer or ""
+                            return f"{manufacturer} {version}".strip()
+                    except:
+                        pass
+                    
+                    # Return with manufacturer prefix
+                    manufacturer = cs.Manufacturer or ""
+                    return f"{manufacturer} {model}".strip()
+                else:
+                    # Model already contains full name
+                    return model.strip()
+        except:
+            pass
+
+        # Try Win32_ComputerSystemProduct
+        try:
+            product = c.Win32_ComputerSystemProduct()[0]
+            
+            # Try Version first (often contains full product name)
+            version = product.Version or ""
+            if version and version.strip() and version not in generic_names:
+                cs = c.Win32_ComputerSystem()[0]
+                manufacturer = cs.Manufacturer or ""
+                return f"{manufacturer} {version}".strip()
+            
+            # Try Name
+            name = product.Name or ""
+            if name and name.strip() and name not in generic_names:
+                cs = c.Win32_ComputerSystem()[0]
+                manufacturer = cs.Manufacturer or ""
+                return f"{manufacturer} {name}".strip()
+        except:
+            pass
+
+        # Fallback to Manufacturer + Model
+        try:
+            cs = c.Win32_ComputerSystem()[0]
+            manufacturer = cs.Manufacturer or ""
+            model = cs.Model or ""
+            full_name = f"{manufacturer} {model}".strip()
+            
+            if full_name and not any(generic in full_name for generic in generic_names):
+                return full_name
+        except:
+            pass
+
+        return "Unknown Device"
+        
+    except Exception as e:
+        return f"Unknown Device (Error: {str(e)})"
 
 
 def collect_system_info():
     """Collect all system information."""
     return {
-        # Removed manufaktur, jenis, lisensi_windows, credential, office, lisensi_office
-        # These will be filled manually by admin (role 1) through the web interface
+        # jenis, lisensi_windows, credential, office, lisensi_office
+        # will be filled manually by admin (role 1) through the web interface
+        'manufaktur': get_device_model(),
         'cpu': get_cpu_info(),
         'ram': get_ram_info(),
         'os': get_os_info(),
@@ -130,7 +337,7 @@ def send_to_api(email, data):
     # Headers with API Key
     headers = {
         'Content-Type': 'application/json',
-        'X-API-Key': API_KEY,  # Now accessible because it's defined at module level
+        'X-API-Key': API_KEY,
         'User-Agent': 'IT-Helpdesk-Inventory-Collector/1.0'
     }
 
