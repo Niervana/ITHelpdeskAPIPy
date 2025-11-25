@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-IT Helpdesk Inventory Collector
+Niervana IT Helpdesk Inventory Collector
 Automatically collects PC specifications and sends them to the IT Helpdesk API.
 
 Compatible with Windows 7/8/10/11.
